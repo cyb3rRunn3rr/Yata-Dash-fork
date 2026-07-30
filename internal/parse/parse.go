@@ -62,31 +62,95 @@ func SeedTimeToSeconds(s string) *float64 {
 		}
 		return nil
 	}
-	grp := func(pattern string, flags ...string) float64 {
-		p := pattern
-		if len(flags) > 0 && flags[0] == "i" {
-			p = "(?i)" + p
-		}
-		re := regexp.MustCompile(p)
-		m := re.FindStringSubmatch(s)
-		if m == nil {
-			return 0
-		}
-		v, _ := strconv.ParseFloat(m[1], 64)
-		return v
+	tokens := durTokenRe.FindAllStringSubmatch(s, -1)
+	if len(tokens) == 0 {
+		return nil
 	}
-	total := grp(`([\d.]+)\s*Y`, "i")*365.25*86400 +
-		grp(`([\d.]+)\s*M`)*30.44*86400 + // uppercase M only
-		grp(`([\d.]+)\s*W`, "i")*7*86400 +
-		grp(`([\d.]+)\s*D`, "i")*86400 +
-		grp(`([\d.]+)\s*h`)*3600 +
-		grp(`([\d.]+)\s*m`)*60 + // lowercase m only
-		grp(`([\d.]+)\s*s`)
-
+	units := make([]durUnit, len(tokens))
+	for i, t := range tokens {
+		units[i] = classifyDurUnit(t[2])
+	}
+	// A bare lowercase "m" means minutes in English layouts and months in
+	// Portuguese ones ("2m 4d 13h 59m 13s" is 2 months … 59 minutes). UNIT3D
+	// renders units in descending order, so an "m" with a day, week or hour
+	// after it occupies the month slot; every later one is minutes.
+	for i, t := range tokens {
+		if units[i] != durUnknown || t[2] != "m" {
+			continue
+		}
+		units[i] = durMinute
+		for _, later := range units[i+1:] {
+			if later == durDay || later == durWeek || later == durHour {
+				units[i] = durMonth
+				break
+			}
+		}
+	}
+	var total float64
+	for i, t := range tokens {
+		v, err := strconv.ParseFloat(t[1], 64)
+		if err != nil {
+			continue
+		}
+		total += v * durSeconds[units[i]]
+	}
 	if total <= 0 {
 		return nil
 	}
 	return &total
+}
+
+// durTokenRe splits a duration into value/unit pairs, e.g. "178a 2m 4d 20h
+// 52m 38s" → (178,a) (2,m) (4,d) (20,h) (52,m) (38,s). Every occurrence of a
+// unit counts, so a string carrying both a month and a minute "m" adds both.
+var durTokenRe = regexp.MustCompile(`([\d.]+)\s*([A-Za-zÀ-ÿ]+)`)
+
+type durUnit int
+
+const (
+	durUnknown durUnit = iota
+	durYear
+	durMonth
+	durWeek
+	durDay
+	durHour
+	durMinute
+	durSecond
+)
+
+var durSeconds = map[durUnit]float64{
+	durUnknown: 0,
+	durYear:    365.25 * 86400,
+	durMonth:   30.44 * 86400,
+	durWeek:    7 * 86400,
+	durDay:     86400,
+	durHour:    3600,
+	durMinute:  60,
+	durSecond:  1,
+}
+
+// classifyDurUnit maps a unit token to its duration unit. Case matters where
+// tracker layouts rely on it: "M" is months against "m" minutes in English,
+// and "S" is semanas (weeks) against "s" seconds on Portuguese sites. A bare
+// lowercase "m" is ambiguous and gets resolved by position in the caller.
+func classifyDurUnit(raw string) durUnit {
+	switch raw {
+	case "y", "Y", "a", "A", "ano", "anos", "year", "years":
+		return durYear
+	case "M", "mo", "mes", "meses", "month", "months":
+		return durMonth
+	case "w", "W", "S", "sem", "semana", "semanas", "week", "weeks":
+		return durWeek
+	case "d", "D", "dia", "dias", "day", "days":
+		return durDay
+	case "h", "H", "hora", "horas", "hour", "hours":
+		return durHour
+	case "min", "mins", "minuto", "minutos", "minute", "minutes":
+		return durMinute
+	case "s", "seg", "segs", "segundo", "segundos", "sec", "secs", "second", "seconds":
+		return durSecond
+	}
+	return durUnknown
 }
 
 // AnyFloat converts any numeric JSON value to float64.
