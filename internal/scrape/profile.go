@@ -204,9 +204,19 @@ func mergedLabels(extra map[string]string) map[string]string {
 // against the reference files.
 func ExtractFromHTML(rawHTML string, spec Spec) map[string]string {
 	labels := mergedLabels(spec.ExtraLabels)
-	result := extractStats(rawHTML, labels, spec.EventTitleClass)
+	// The class-pair strategy is opt-in per def and names the exact elements
+	// holding each stat, so it runs FIRST and wins: the generic strategies
+	// guess from page structure and can latch onto a same-named stat elsewhere
+	// on the page (Samaritano labels both the credited and the real ratio
+	// "Ratio", one in the header bar and one in the traffic panel).
+	result := map[string]string{}
 	if scc := spec.StatCardClasses; scc != nil {
 		extractStatCardPairs(rawHTML, labels, scc.Label, scc.Value, result)
+	}
+	for k, v := range extractStats(rawHTML, labels, spec.EventTitleClass) {
+		if result[k] == "" {
+			result[k] = v
+		}
 	}
 	if spec.Gazelle {
 		extractGazelleIDStats(rawHTML, result)
