@@ -15,13 +15,50 @@ export function parseSize(str: unknown): number | null {
   return parseFloat(m[1]) * (factors[m[2].toLowerCase()] ?? 1);
 }
 
+type DurUnit = 'year' | 'month' | 'week' | 'day' | 'hour' | 'minute' | 'second' | null;
+
+const DUR_SECONDS: Record<Exclude<DurUnit, null>, number> = {
+  year: 365 * 86400, month: 30 * 86400, week: 7 * 86400,
+  day: 86400, hour: 3600, minute: 60, second: 1,
+};
+
+/**
+ * Map a unit token to its duration unit. Case matters where tracker layouts
+ * rely on it: "M" is months against "m" minutes in English, and "S" is
+ * semanas (weeks) against "s" seconds on Portuguese sites. A bare lowercase
+ * "m" is ambiguous and gets resolved by position in parseSeedTime.
+ */
+function classifyDurUnit(raw: string): DurUnit {
+  switch (raw) {
+    case 'y': case 'Y': case 'a': case 'A':
+    case 'ano': case 'anos': case 'year': case 'years':
+      return 'year';
+    case 'M': case 'mo': case 'mes': case 'meses': case 'month': case 'months':
+      return 'month';
+    case 'w': case 'W': case 'S':
+    case 'sem': case 'semana': case 'semanas': case 'week': case 'weeks':
+      return 'week';
+    case 'd': case 'D': case 'dia': case 'dias': case 'day': case 'days':
+      return 'day';
+    case 'h': case 'H': case 'hora': case 'horas': case 'hour': case 'hours':
+      return 'hour';
+    case 'min': case 'mins':
+    case 'minuto': case 'minutos': case 'minute': case 'minutes':
+      return 'minute';
+    case 's': case 'seg': case 'segs': case 'segundo': case 'segundos':
+    case 'sec': case 'secs': case 'second': case 'seconds':
+      return 'second';
+  }
+  return null;
+}
+
 /**
  * Parse seed time string → total seconds.
- * Supports: Y M W D h m s
- * Case rules:
- *   Y/y = years, M = months (UPPERCASE only), W/w = weeks, D/d = days,
- *   h = hours, m = minutes (lowercase only), s = seconds
+ * Splits the string into value/unit pairs so every occurrence of a unit
+ * counts, and understands the Portuguese unit letters UNIT3D renders in
+ * pt-BR ("178a 2m 4d 20h 52m 38s" = 178 years, 2 months … 52 minutes).
  * Also accepts a plain integer/float as raw seconds.
+ * Mirrors parse.SeedTimeToSeconds on the Go side.
  */
 export function parseSeedTime(str: unknown): number | null {
   if (str == null || str === '') return null;
@@ -30,20 +67,32 @@ export function parseSeedTime(str: unknown): number | null {
   // Plain number → raw seconds
   if (/^\d+(\.\d+)?$/.test(s)) return Math.round(parseFloat(s));
 
+  const tokens = [...s.matchAll(/(\d+(?:\.\d+)?)\s*([A-Za-zÀ-ÿ]+)/g)];
+  if (!tokens.length) return null;
+
+  const units = tokens.map((t) => classifyDurUnit(t[2]));
+  // A bare lowercase "m" means minutes in English layouts and months in
+  // Portuguese ones. UNIT3D renders units in descending order, so an "m" with
+  // a day, week or hour after it occupies the month slot; later ones are
+  // minutes.
+  tokens.forEach((t, i) => {
+    if (units[i] !== null || t[2] !== 'm') return;
+    units[i] = 'minute';
+    for (let j = i + 1; j < units.length; j++) {
+      if (units[j] === 'day' || units[j] === 'week' || units[j] === 'hour') {
+        units[i] = 'month';
+        break;
+      }
+    }
+  });
+
   let total = 0, found = false;
-  const grp = (pattern: RegExp): number => {
-    const m = s.match(pattern);
-    if (!m) return 0;
+  tokens.forEach((t, i) => {
+    const u = units[i];
+    if (!u) return;
     found = true;
-    return parseFloat(m[1]);
-  };
-  total += grp(/(\d+(?:\.\d+)?)\s*[Yy](?![a-zA-Z])/) * 365 * 86400;
-  total += grp(/(\d+(?:\.\d+)?)\s*M(?![a-zA-Z])/)    * 30  * 86400; // uppercase M
-  total += grp(/(\d+(?:\.\d+)?)\s*[Ww](?![a-zA-Z])/) * 7   * 86400;
-  total += grp(/(\d+(?:\.\d+)?)\s*[Dd](?![a-zA-Z])/) * 86400;
-  total += grp(/(\d+(?:\.\d+)?)\s*h(?![a-zA-Z])/)    * 3600;
-  total += grp(/(\d+(?:\.\d+)?)\s*m(?![a-zA-Z])/)    * 60;  // lowercase m
-  total += grp(/(\d+(?:\.\d+)?)\s*s(?![a-zA-Z])/);
+    total += parseFloat(t[1]) * DUR_SECONDS[u];
+  });
   return found ? Math.round(total) : null;
 }
 
