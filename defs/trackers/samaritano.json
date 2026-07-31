@@ -42,7 +42,7 @@
     {
       "name": "Leech",
       "style": { "color": "#800000", "icon": "fas fa-mosquito" },
-      "requirements": { "description": "Starting group for new registrations. Accounts that fall below ratio 1.00 with a negative buffer are also placed here." },
+      "requirements": { "description": "Automatic demotion group for accounts that fall below ratio 1.00 with a negative buffer." },
       "perks": [
         { "icon": "fas fa-arrow-down-short-wide text-blue", "label": "DL slots: 0" },
         { "icon": "fas fa-upload text-success", "label": "Upload Torrents" }
@@ -52,7 +52,8 @@
       "name": "User",
       "style": { "color": "#7289DA", "icon": "fas fa-user" },
       "requirements": {
-        "min_ratio": 0.4
+        "min_ratio": 0.4,
+        "note": "Starting group for new registrations."
       },
       "perks": [
         { "icon": "fas fa-arrow-down-short-wide text-blue", "label": "DL slots: 3" },
